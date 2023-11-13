@@ -20,6 +20,8 @@ from utils.utils import (DEFAULT_IM_END_TOKEN, DEFAULT_IM_START_TOKEN,
                          AverageMeter, ProgressMeter, Summary, dict_to_cuda,
                          intersectionAndUnionGPU)
 
+from transformers import AutoConfig
+
 
 def parse_args(args):
     parser = argparse.ArgumentParser(description="LISA Model Training")
@@ -148,9 +150,14 @@ def main(args):
         torch_dtype = torch.bfloat16
     elif args.precision == "fp16":
         torch_dtype = torch.half
-    model = LISAForCausalLM.from_pretrained(
-        args.version, torch_dtype=torch_dtype, low_cpu_mem_usage=True, **model_args
-    )
+    # model = LISAForCausalLM.from_pretrained(
+    #     args.version, torch_dtype=torch_dtype, low_cpu_mem_usage=True, **model_args
+    # )
+    ### Hacky fix for GPU OOM
+    cfg = AutoConfig.from_pretrained(args.version)
+    cfg.num_hidden_layers = 2
+    model = LISAForCausalLM._from_config(cfg, **model_args)
+
     model.config.eos_token_id = tokenizer.eos_token_id
     model.config.bos_token_id = tokenizer.bos_token_id
     model.config.pad_token_id = tokenizer.pad_token_id

@@ -139,6 +139,11 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
             
         self.seg_token_idx = kwargs.pop("seg_token_idx")
 
+        # Question: 
+        # Super class "LlavaLlamaForCausalLm": __init__() method sets:
+        # self.model = LlavaLlamaModel(config)
+        # self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
+
         super().__init__(config)
 
         self.model = LisaModel(config, **kwargs)
