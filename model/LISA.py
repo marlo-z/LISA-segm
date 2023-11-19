@@ -12,6 +12,8 @@ from .llava.model.language_model.llava_llama import (LlavaLlamaForCausalLM,
                                                      LlavaLlamaModel)
 from .segment_anything import build_sam_vit_h
 
+import re
+
 
 def dice_loss(
     inputs: torch.Tensor,
@@ -154,8 +156,46 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
 
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
+        # Box projector: MLP layer projecting box embedding dimension --> transformer dimension
+        box_proj_params = kwargs.pop("box_projector_params")
+        box_embed_dim = kwargs.pop("box_embed_dim")
+        self.initialize_box_projector(box_proj_params, box_embed_dim)
+
         # Initialize weights and apply final processing
         self.post_init()
+    
+    def initialize_box_projector(self, params, in_dim):
+        out_dim = 5120          # dimension of transformer
+
+        if params == 'linear':
+            return nn.Linear(in_dim, out_dim)
+
+        match = re.match(r'mlp_(\d+)x_(\d+)l_(\w+)$', params)
+        if match:
+            hidden_dim_ratio = int(match.group(1))
+            hidden_dim = in_dim * hidden_dim_ratio
+            num_layers = int(match.group(2))
+            activation = match.group(3)
+
+            if activation == "gelu":
+                activation = nn.GELU()
+            elif activation == "relu":
+                activation == nn.RELU()
+            else:
+                raise ValueError(f'Unknown activation function: {activation}')
+
+            modules = [nn.Linear(in_dim, hidden_dim), activation]
+            for _ in range(1, num_layers):
+                modules.append(nn.Linear(hidden_dim, hidden_dim))
+                modules.append(activation)
+            # final layer
+            modules.append(nn.Linear(hidden_dim, out_dim))
+
+            # print("DEBUG:", "Box Projection layer consists:", modules)
+            self.box_projector = nn.Sequential(*modules)
+
+        else:
+            raise ValueError(f'Unknown box projector parameters: {params}')
 
     # Use SAM (visual_model) --> embedding of image (used later for mask decoder)
     def get_visual_embs(self, pixel_values: torch.FloatTensor):
@@ -216,11 +256,12 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
         # FAKE BBOX TOKENS (for testing)
         n_images = images.shape[0]
         n_boxes = 100
-        box_embed_dim = 5120
+        box_embed_dim = 256
         box_embeds = torch.rand(n_images, 
                                 n_boxes, 
                                 box_embed_dim, 
                                 dtype=torch.bfloat16).to("cuda:0")
+        box_embeds = self.box_projector(box_embeds)
         # box_embeds: [n_images, n_boxes, box_embed_dim]
 
         # hack for IMAGE_TOKEN_INDEX (we suppose that there is only one image, and it is in the front)

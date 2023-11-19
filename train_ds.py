@@ -105,6 +105,8 @@ def parse_args(args):
         type=str,
         choices=["llava_v1", "llava_llama_2"],
     )
+    parser.add_argument("--box_projector_params", default="linear", type=str)
+    parser.add_argument("--dev", action="store_true", default=False)
     return parser.parse_args(args)
 
 
@@ -134,6 +136,10 @@ def main(args):
             [DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN], special_tokens=True
         )
 
+    ### TODO:
+    # load the box embeddings and find dim
+    box_embed_dim = 256
+
     model_args = {
         "train_mask_decoder": args.train_mask_decoder,
         "out_dim": args.out_dim,
@@ -144,19 +150,24 @@ def main(args):
         "vision_pretrained": args.vision_pretrained,
         "vision_tower": args.vision_tower,
         "use_mm_start_end": args.use_mm_start_end,
+        "box_projector_params": args.box_projector_params,
+        "box_embed_dim": box_embed_dim
     }
     torch_dtype = torch.float32
     if args.precision == "bf16":
         torch_dtype = torch.bfloat16
     elif args.precision == "fp16":
         torch_dtype = torch.half
-    # model = LISAForCausalLM.from_pretrained(
-    #     args.version, torch_dtype=torch_dtype, low_cpu_mem_usage=True, **model_args
-    # )
-    ### Hacky fix for GPU OOM
-    cfg = AutoConfig.from_pretrained(args.version)
-    cfg.num_hidden_layers = 2
-    model = LISAForCausalLM._from_config(cfg, **model_args)
+    
+    if args.dev:
+        ### Hacky fix for GPU OOM
+        cfg = AutoConfig.from_pretrained(args.version)
+        cfg.num_hidden_layers = 2
+        model = LISAForCausalLM._from_config(cfg, **model_args)
+    else:
+        model = LISAForCausalLM.from_pretrained(
+            args.version, torch_dtype=torch_dtype, low_cpu_mem_usage=True, **model_args
+        )
 
     model.config.eos_token_id = tokenizer.eos_token_id
     model.config.bos_token_id = tokenizer.bos_token_id

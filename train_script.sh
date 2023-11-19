@@ -6,4 +6,6 @@ deepspeed --include=localhost:0 --master_port=24999 train_ds.py \
   --vision_pretrained="./pretrained_weights/sam_vit_h_4b8939.pth" \
   --dataset="reason_seg" \
   --sample_rates="1" \
-  --exp_name="test-lisa"
+  --exp_name="test-lisa" \
+  --box_projector_params="mlp_4x_2l_gelu" \
+  --dev
