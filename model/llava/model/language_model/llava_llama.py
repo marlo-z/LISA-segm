@@ -52,6 +52,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
     def get_model(self):
         return self.model
 
+    # LlavaLlamaForCausalLM --> Main forward method: takes (text, image)
     def forward(
         self,
         input_ids: torch.LongTensor = None,
@@ -78,7 +79,11 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         return_dict = (
             return_dict if return_dict is not None else self.config.use_return_dict
         )
+        
+        # images: torch.Size([6, 3, 224, 224])
 
+        # prepare inputs for multimodal model 
+        # (concats image embedding from CLIP to text embedding, before feeding to LLM)
         (
             input_ids,
             attention_mask,
@@ -90,6 +95,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         )
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
 
+        # LLM LlamaModel --> forward(), passing embeddings [text_embed + image_embeds]
         outputs = self.model(
             input_ids=input_ids,
             attention_mask=attention_mask,

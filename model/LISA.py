@@ -85,8 +85,12 @@ class LisaMetaModel:
             self.visual_model.mask_decoder.train()
             for param in self.visual_model.mask_decoder.parameters():
                 param.requires_grad = True
+        
+        # model.visual_model = SAM VIT-h --> used for encoding image into embeddings 
+        # that will be used for mask decoder together with <seg> token embeddings to generate segmentation mask
 
         # Projection layer
+        # ---> this replaces the "lm_head" that maps hidden_state to vocab_size?
         in_dim = config.hidden_size
         out_dim = config.out_dim
         text_fc = [
@@ -153,6 +157,7 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
         # Initialize weights and apply final processing
         self.post_init()
 
+    # Use SAM (visual_model) --> embedding of image (used later for mask decoder)
     def get_visual_embs(self, pixel_values: torch.FloatTensor):
         with torch.no_grad():
             image_embeddings_list = []
@@ -171,10 +176,11 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
             return super().forward(**kwargs)
         return self.model_forward(**kwargs)
 
+    # LISA's main forward
     def model_forward(
         self,
         images: torch.FloatTensor,
-        images_clip: torch.FloatTensor,
+        images_clip: torch.FloatTensor,         # Question: what is images_clip vs images?
         input_ids: torch.LongTensor,
         labels: torch.LongTensor,
         attention_masks: torch.LongTensor,
@@ -185,10 +191,15 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
         inference: bool = False,
         **kwargs,
     ):
+        #images torch.Size([2, 3, 1024, 1024])
+        #images clip torch.Size([2, 3, 224, 224])
+
+        # image_embeddings = SAM_encoder(images) --> embeddings fed into decoder to generate output mask
         image_embeddings = self.get_visual_embs(images)
         batch_size = image_embeddings.shape[0]
         assert batch_size == len(offset) - 1
 
+        # seg_token_mask used as an index mask later
         seg_token_mask = input_ids[:, 1:] == self.seg_token_idx
         seg_token_mask = torch.cat(
             [
@@ -228,6 +239,7 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
             output = None
 
         else:
+            # Question: what is this doing?
             images_clip_list = []
             for i in range(len(offset) - 1):
                 start_i, end_i = offset[i], offset[i + 1]
@@ -240,22 +252,36 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
                 images_clip_list.append(images_clip_i)
             images_clip = torch.cat(images_clip_list, dim=0)
 
+            # images clip torch.Size([6, 3, 224, 224])  (batch size went from 2 --> 6)
+
+            # LlavaLlamaForCausalLM --> forward()
             output = super().forward(
-                images=images_clip,
+                images=images_clip,                 # input images: images_clip dimension:
                 attention_mask=attention_masks,
                 input_ids=input_ids,
                 labels=labels,
                 output_hidden_states=True,
             )
             output_hidden_states = output.hidden_states
+        
+        # output hidden states
+        # [torch.Size([6, 420, 5120]), torch.Size([6, 420, 5120]), torch.Size([6, 420, 5120])]
 
         hidden_states = []
 
         assert len(self.model.text_hidden_fcs) == 1
         hidden_states.append(self.model.text_hidden_fcs[0](output_hidden_states[-1]))
 
+        ### Mask decoding process
+
+        # Problem: dimension doesn't match, after adding box tokens
+        # last_hidden_state tensor has dimensions [6, (text + image + box) tokens, 256]
+        # but seg_token_mask as dimensions [6, (text + image) tokens]
+        # dimension doesn't match, after adding box tokens
+
         last_hidden_state = torch.stack(hidden_states, dim=-1).sum(dim=-1)
-        pred_embeddings = last_hidden_state[seg_token_mask]
+        # Question
+        pred_embeddings = last_hidden_state[seg_token_mask]             # for extracting the embedding of the <seg> token
         seg_token_counts = seg_token_mask.int().sum(-1)  # [bs, ]
 
         seg_token_offset = seg_token_counts.cumsum(-1)

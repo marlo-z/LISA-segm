@@ -17,6 +17,7 @@ from abc import ABC, abstractmethod
 
 import torch
 import torch.nn as nn
+import numpy as np
 
 # from llava.constants import IGNORE_INDEX, IMAGE_TOKEN_INDEX, DEFAULT_IMAGE_PATCH_TOKEN, DEFAULT_IM_START_TOKEN, DEFAULT_IM_END_TOKEN
 from utils.utils import (DEFAULT_IM_END_TOKEN, DEFAULT_IM_START_TOKEN,
@@ -90,6 +91,8 @@ class LlavaMetaForCausalLM(ABC):
     def get_vision_tower(self):
         return self.get_model().get_vision_tower()
 
+    # Encode image into image embeddings --> project to text embedding space/dimension
+    # model.vision_tower --> CLIP, generates image embeddings to be fed into LLM (different from model.visual_model)
     def encode_images(self, images):
         image_features = self.get_model().get_vision_tower()(images)
         image_features = self.get_model().mm_projector(image_features)
@@ -121,14 +124,28 @@ class LlavaMetaForCausalLM(ABC):
             image_features = [x.flatten(0, 1) for x in image_features]
         else:
             image_features = self.encode_images(images)
+            # image_features --> image embeddings, encode image using CLIP (model.vision_tower)
 
+        # image_embeds dimension: [6, 256, 5120] -- [..., n_vec, vec_len]
+        # input_ids dimensions: [6, 163]         -- [..., n_tokens]
+
+        # FAKE BBOX TOKENS (for testing)
+        n_images = images.shape[0]
+        n_boxes = 10
+        box_embed_dim = 5120
+        box_embeds = torch.rand(n_images, n_boxes, box_embed_dim, dtype=torch.bfloat16).to("cuda:0")
+        image_features = torch.cat([image_features, box_embeds], dim=1)
+
+        # new_input_embeds will contain image embeddings insertted between text embeddings 
         new_input_embeds = []
         new_labels = [] if labels is not None else None
         cur_image_idx = 0
+        # iterate over each input sequence of word/token ids (each input text)
         for batch_idx, cur_input_ids in enumerate(input_ids):
+            # if not <image token> is found
             if (cur_input_ids == IMAGE_TOKEN_INDEX).sum() == 0:
                 # multimodal LLM, but the current sample is not multimodal
-                cur_input_embeds = self.get_model().embed_tokens(cur_input_ids)
+                cur_input_embeds = self.get_model().embed_tokens(cur_input_ids)         # model.embed_tokens --> text embedings
                 cur_input_embeds = (
                     cur_input_embeds
                     + (
@@ -140,12 +157,14 @@ class LlavaMetaForCausalLM(ABC):
                     new_labels.append(labels[batch_idx])
                 cur_image_idx += 1
                 continue
+            # positions of where <image token> appeared
             image_token_indices = torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0]
             cur_new_input_embeds = []
             if labels is not None:
                 cur_labels = labels[batch_idx]
                 cur_new_labels = []
                 assert cur_labels.shape == cur_input_ids.shape
+            # iterate over all positions where <image token appeared>
             while image_token_indices.numel() > 0:
                 cur_image_features = image_features[cur_image_idx]
                 image_token_start = image_token_indices[0]
