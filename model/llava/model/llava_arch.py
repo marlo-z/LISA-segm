@@ -99,7 +99,7 @@ class LlavaMetaForCausalLM(ABC):
         return image_features
 
     def prepare_inputs_labels_for_multimodal(
-        self, input_ids, attention_mask, past_key_values, labels, images
+        self, input_ids, attention_mask, past_key_values, labels, images, box_embeds = None
     ):
         vision_tower = self.get_vision_tower()
         if vision_tower is None or images is None or input_ids.shape[1] == 1:
@@ -126,15 +126,16 @@ class LlavaMetaForCausalLM(ABC):
             image_features = self.encode_images(images)
             # image_features --> image embeddings, encode image using CLIP (model.vision_tower)
 
-        # image_embeds dimension: [6, 256, 5120] -- [..., n_vec, vec_len]
-        # input_ids dimensions: [6, 163]         -- [..., n_tokens]
+        # image_embeds dimension: [6, 256, 5120] -- [bs, n_vec, vec_len]
+        # input_ids dimensions: [6, 163]         -- [bs, n_tokens]
 
-        # FAKE BBOX TOKENS (for testing)
-        n_images = images.shape[0]
-        n_boxes = 10
-        box_embed_dim = 5120
-        box_embeds = torch.rand(n_images, n_boxes, box_embed_dim, dtype=torch.bfloat16).to("cuda:0")
+        # Append bbox token embeddings for each image
+        # box_embed: [n_images, n_boxes, box_embed_dim]
         image_features = torch.cat([image_features, box_embeds], dim=1)
+
+        # image_features: [batch_size=6, n_img_token=256, vec_dim=5120]
+        # box_embeds: [batch_size=6, n_boxes, box_embed_dim=5120]
+        # Appendinged image_features: [batch_size=6, n_img_token + n_boxes, box_embed_dim=5120]
 
         # new_input_embeds will contain image embeddings insertted between text embeddings 
         new_input_embeds = []

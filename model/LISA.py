@@ -91,8 +91,8 @@ class LisaMetaModel:
 
         # Projection layer
         # ---> this replaces the "lm_head" that maps hidden_state to vocab_size?
-        in_dim = config.hidden_size
-        out_dim = config.out_dim
+        in_dim = config.hidden_size         # dimension of LLM?
+        out_dim = config.out_dim            # vocab_size?
         text_fc = [
             nn.Linear(in_dim, in_dim),
             nn.ReLU(inplace=True),
@@ -192,7 +192,11 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
         **kwargs,
     ):
         #images torch.Size([2, 3, 1024, 1024])
+
         #images clip torch.Size([2, 3, 224, 224])
+        #            [n_images, c, h, w]
+
+        # print("Offset:", offset)
 
         # image_embeddings = SAM_encoder(images) --> embeddings fed into decoder to generate output mask
         image_embeddings = self.get_visual_embs(images)
@@ -208,9 +212,20 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
             ],
             dim=1,
         )
+
+        # FAKE BBOX TOKENS (for testing)
+        n_images = images.shape[0]
+        n_boxes = 100
+        box_embed_dim = 5120
+        box_embeds = torch.rand(n_images, 
+                                n_boxes, 
+                                box_embed_dim, 
+                                dtype=torch.bfloat16).to("cuda:0")
+        # box_embeds: [n_images, n_boxes, box_embed_dim]
+
         # hack for IMAGE_TOKEN_INDEX (we suppose that there is only one image, and it is in the front)
         seg_token_mask = torch.cat(
-            [torch.zeros((seg_token_mask.shape[0], 255)).bool().cuda(), seg_token_mask],
+            [torch.zeros((seg_token_mask.shape[0], 255 + n_boxes)).bool().cuda(), seg_token_mask],
             dim=1,
         )
 
@@ -249,13 +264,34 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
                     .expand(end_i - start_i, -1, -1, -1)
                     .contiguous()
                 )
+                # each images_clip[i] expanded from [3, 224, 224] to [3, 3, 224, 224]
+                # don't know why?
                 images_clip_list.append(images_clip_i)
+            # print("Original images clip:", images_clip.size())
             images_clip = torch.cat(images_clip_list, dim=0)
 
-            # images clip torch.Size([6, 3, 224, 224])  (batch size went from 2 --> 6)
+            # Final images clip torch.Size([6, 3, 224, 224])  (batch size went from 2 --> 6)
+
+            box_embed_list = []
+            for i in range(len(offset) - 1):
+                start_i, end_i = offset[i], offset[i + 1]
+                box_embed_i = (
+                    box_embeds[i]
+                    .unsqueeze(0)                         # add extra dimension in front
+                    .expand(end_i - start_i, -1, -1)      # duplicate in that added dimension
+                    .contiguous()
+                )
+                box_embed_list.append(box_embed_i)
+            # print("Original box embeds:", box_embeds.size())
+            box_embeds = torch.cat(box_embed_list, dim=0)
+
+            # print("Image clip after expanding:", images_clip.size())
+            # print("Box embedding after expanding:", box_embeds.size())
+            # input()
 
             # LlavaLlamaForCausalLM --> forward()
             output = super().forward(
+                box_embeds = box_embeds, 
                 images=images_clip,                 # input images: images_clip dimension:
                 attention_mask=attention_masks,
                 input_ids=input_ids,
