@@ -54,6 +54,8 @@ class ReasonSegDataset(torch.utils.data.Dataset):
         self.long_question_list = LONG_QUESTION_LIST
         self.answer_list = ANSWER_LIST
 
+        # split "ReasonSeg|trian" --> reason_seg_data: ("ReasonSeg"), 
+        #                             splits: ("train", ...)
         reason_seg_data, splits = reason_seg_data.split("|")
         splits = splits.split("_")
         images = []
@@ -68,6 +70,15 @@ class ReasonSegDataset(torch.utils.data.Dataset):
         self.reason_seg_data = (images, jsons)
 
         print("number of reason_seg samples: ", len(images))
+    
+        # reason_seg_data =  "ReasonSeg"
+        '''Looping through all .npy files and finding max # of tokens contained in each file'''
+        # boxes_path_names = os.path.join(base_image_dir, "reason_seg", reason_seg_data, "train_box", "*.npy")
+        # self.max_num_boxes = self.find_max_num_boxes(boxes_path_names)
+        # print("DEBUG: max number of box tokens per image:", self.max_num_boxes)
+
+        boxes_path_names = os.path.join(base_image_dir, "reason_seg", reason_seg_data, "train_box", "*.npy")
+        self.check_box_embeddings(boxes_path_names)
 
         if explanatory != -1:
             self.explanatory_question_list = EXPLANATORY_QUESTION_LIST
@@ -91,6 +102,29 @@ class ReasonSegDataset(torch.utils.data.Dataset):
 
             print("len(self.img_to_explanation): ", len(self.img_to_explanation))
 
+    '''Not used''' 
+    def find_max_num_boxes(self, boxes_path_names):
+        max_num_boxes = 0
+        for box_path in glob.glob(boxes_path_names):
+            box_embeds = np.load(box_path)
+            if len(box_embeds) == 0:
+                continue
+            # print(box_embeds)
+            # print(box_embeds.shape)
+            num_boxes = box_embeds.shape[0]
+            max_num_boxes = max(max_num_boxes, num_boxes)
+        return max_num_boxes
+
+    def check_box_embeddings(self, boxes_path_names):
+        empty = 0
+        total = 0
+        for box_path in glob.glob(boxes_path_names):
+            box_embeds = np.load(box_path)
+            if len(box_embeds) == 0:
+                empty += 1
+            total += 1
+        print(f"Found {total} box embedding files, {empty} contained no boxes")
+
     def __len__(self):
         return self.samples_per_epoch
 
@@ -108,7 +142,7 @@ class ReasonSegDataset(torch.utils.data.Dataset):
 
     def __getitem__(self, idx):
         images, jsons = self.reason_seg_data
-        idx = random.randint(0, len(images) - 1)
+        idx = random.randint(0, len(images) - 1)        # Question: why random index?
         image_path = images[idx]
         json_path = jsons[idx]
 
@@ -205,6 +239,29 @@ class ReasonSegDataset(torch.utils.data.Dataset):
             masks = torch.from_numpy(masks)
             label = torch.ones(masks.shape[1], masks.shape[2]) * self.ignore_label
 
+        #### load box embeddings from .npy file ####
+        # image path: ./dataset/reason_seg/ReasonSeg/train/<img_name>.jpg
+        # box path:   ./dataset/reason_seg/ReasonSeg/train_box/<img_name>.npy
+        box_path =  image_path.replace(".jpg", ".npy").replace("train", "train_box")
+        box_embeds = torch.from_numpy(np.load(box_path))
+
+        '''Just padd each box embedding tensor for each image to the batch max num tokens'''
+
+        '''This is padding each box tensor to global max 
+        (looping through all .npy files and findng max # of box tokens for each file)
+        '''
+        # print("Before:", box_embeds.size())
+        # if box_embeds.nelement() == 0:
+        #     box_embeds = torch.zeros(self.max_num_boxes, 256)       # TODO: temp
+        # else:
+        #     n_boxes, embed_dim = box_embeds.size(0), box_embeds.size(1)
+        #     box_embeds = torch.cat([box_embeds, torch.zeros(self.max_num_boxes - n_boxes, embed_dim)], dim=0)
+        # print("After:", box_embeds.size())
+
+        # print("Loaded box embed:", box_embeds)
+        # print("image_path:", image_path)
+        # print("box_path:", box_path)
+
         return (
             image_path,
             image,
@@ -215,4 +272,5 @@ class ReasonSegDataset(torch.utils.data.Dataset):
             resize,
             questions,
             sampled_sents,
+            box_embeds              # __getitem__ method also returns box_embds
         )

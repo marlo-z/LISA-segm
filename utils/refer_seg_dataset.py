@@ -124,7 +124,7 @@ class ReferSegDataset(torch.utils.data.Dataset):
         images = refer_seg_ds["images"]
         annotations = refer_seg_ds["annotations"]
         img2refs = refer_seg_ds["img2refs"]
-        idx = random.randint(0, len(images) - 1)
+        idx = random.randint(0, len(images) - 1)            # Question: why random?
         image_info = images[idx]
         image_path = image_info["file_name"]
         image_id = image_info["id"]
@@ -274,4 +274,5 @@ class ReferSegDataset(torch.utils.data.Dataset):
             resize,
             questions,
             sampled_classes,
+            # box tokens/embeddings
         )

@@ -127,6 +127,7 @@ def main(args):
         padding_side="right",
         use_fast=False,
     )
+    # version "liuhaotian/llava-llama-2-13b-chat-lightning-preview"
     tokenizer.pad_token = tokenizer.unk_token
     num_added_tokens = tokenizer.add_tokens("[SEG]")
     args.seg_token_idx = tokenizer("[SEG]", add_special_tokens=False).input_ids[0]
@@ -137,7 +138,6 @@ def main(args):
         )
 
     ### TODO:
-    # load the box embeddings and find dim
     box_embed_dim = 256
 
     model_args = {

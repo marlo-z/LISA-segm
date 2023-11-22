@@ -193,6 +193,16 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
 
             # print("DEBUG:", "Box Projection layer consists:", modules)
             self.box_projector = nn.Sequential(*modules)
+            # DEBUG: weights data type
+            # for name, param in self.box_projector.named_parameters():
+            #     print(name, param.dtype)
+            # input()
+            # (weights are still float32)
+
+            # Question: neccesary?
+            self.box_projector.train()
+            for param in self.box_projector.parameters():
+                param.requires_grad = True
 
         else:
             raise ValueError(f'Unknown box projector parameters: {params}')
@@ -228,47 +238,81 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
         masks_list: List[torch.FloatTensor],
         label_list: List[torch.Tensor],
         resize_list: List[tuple],
+        box_embeds: torch.FloatTensor, 
         inference: bool = False,
         **kwargs,
     ):
-        #images torch.Size([2, 3, 1024, 1024])
+        # images:       torch.Size([2, 3, 1024, 1024])
+        # images clip:  torch.Size([2, 3, 224, 224])
+        #                          [n_images, c, h, w]
+        # input_ids:    torch.Size([6, 186])
+        #                          [n_sentences, n_tokens]
+        # offset:       [0, 3, 6]  (multiple Q-A pair correspond to same image)
+        # box_embeds: [n_images, n_boxes, box_embed_dim]
 
-        #images clip torch.Size([2, 3, 224, 224])
-        #            [n_images, c, h, w]
+        # DEBUG: weights data type, somehow got converted to bfloat16 ???
+        # (use args.precision = 'bf16' by default)
+        # for name, param in self.box_projector.named_parameters():
+        #     print(name, param.dtype)
+        # input()
 
-        # print("Offset:", offset)
+        # TODO: this is a temp fix (need to use args.precision)
+        box_embeds = box_embeds.bfloat16()
+        box_embeds.cuda()
+        box_embeds = self.box_projector(box_embeds)
+        n_boxes = box_embeds.size(1)
+        # box_embeds: [n_images, n_boxes, transformer_dim (5120)]
+
+        
 
         # image_embeddings = SAM_encoder(images) --> embeddings fed into decoder to generate output mask
         image_embeddings = self.get_visual_embs(images)
         batch_size = image_embeddings.shape[0]
         assert batch_size == len(offset) - 1
 
+        ### DEBUG ###
+        # print("offset", offset)
+        # print("input ids:", input_ids.size())
+        # print(input_ids)
+
         # seg_token_mask used as an index mask later
-        seg_token_mask = input_ids[:, 1:] == self.seg_token_idx
+        seg_token_mask = input_ids[:, 1:] == self.seg_token_idx         # (omit first token)
+
+        # seg_token_mask 1: torch.Size([6, 186])  (bool)
+
         seg_token_mask = torch.cat(
             [
                 seg_token_mask,
-                torch.zeros((seg_token_mask.shape[0], 1)).bool().cuda(),
+                torch.zeros((seg_token_mask.shape[0], 1)).bool().cuda(),    # (append 1 token at the end)
             ],
             dim=1,
         )
+    
+        # concatenate [seg_token_mask:[6, 186], zeros[6, 1]]
+        # seg_token_mask 2: torch.Size([6, 187])      (bool)
 
         # FAKE BBOX TOKENS (for testing)
-        n_images = images.shape[0]
-        n_boxes = 100
-        box_embed_dim = 256
-        box_embeds = torch.rand(n_images, 
-                                n_boxes, 
-                                box_embed_dim, 
-                                dtype=torch.bfloat16).to("cuda:0")
-        box_embeds = self.box_projector(box_embeds)
+        # n_images = images.shape[0]
+        # n_boxes = 100
+        # box_embed_dim = 256
+        # box_embeds = torch.rand(n_images, 
+        #                         n_boxes, 
+        #                         box_embed_dim, 
+        #                         dtype=torch.bfloat16).to("cuda:0")
+        # box_embeds = self.box_projector(box_embeds)
         # box_embeds: [n_images, n_boxes, box_embed_dim]
+
 
         # hack for IMAGE_TOKEN_INDEX (we suppose that there is only one image, and it is in the front)
         seg_token_mask = torch.cat(
             [torch.zeros((seg_token_mask.shape[0], 255 + n_boxes)).bool().cuda(), seg_token_mask],
             dim=1,
         )
+
+        ### Since the <img> token will be replaced by 256 clip generated image embeddings 
+        ### Therefore, need to append 255 clip tokens + n box tokens
+        # concatenate [zeros[6, 255 + 100(n_boxes)], seg_token_mask:[6, 187]]
+        # seg_token_mask3 : torch.Size([6, 542])
 
         if inference:
             n_batch = 1
@@ -295,7 +339,7 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
             output = None
 
         else:
-            # Question: what is this doing?
+            # Expand images to match text batch size
             images_clip_list = []
             for i in range(len(offset) - 1):
                 start_i, end_i = offset[i], offset[i + 1]
@@ -306,9 +350,7 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
                     .contiguous()
                 )
                 # each images_clip[i] expanded from [3, 224, 224] to [3, 3, 224, 224]
-                # don't know why?
                 images_clip_list.append(images_clip_i)
-            # print("Original images clip:", images_clip.size())
             images_clip = torch.cat(images_clip_list, dim=0)
 
             # Final images clip torch.Size([6, 3, 224, 224])  (batch size went from 2 --> 6)
