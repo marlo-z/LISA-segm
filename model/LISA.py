@@ -257,13 +257,15 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
         # input()
 
         # TODO: this is a temp fix (need to use args.precision)
-        box_embeds = box_embeds.bfloat16()
-        box_embeds.cuda()
-        box_embeds = self.box_projector(box_embeds)
-        n_boxes = box_embeds.size(1)
+        # box_embeds = box_embeds.bfloat16()
+        # box_embeds.cuda()
+        # box_embeds = self.box_projector(box_embeds)
+        # n_boxes = box_embeds.size(1)
         # box_embeds: [n_images, n_boxes, transformer_dim (5120)]
 
-        
+        # Temp
+        n_boxes = 5
+
 
         # image_embeddings = SAM_encoder(images) --> embeddings fed into decoder to generate output mask
         image_embeddings = self.get_visual_embs(images)
@@ -342,16 +344,22 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
             # Expand images to match text batch size
             images_clip_list = []
             for i in range(len(offset) - 1):
+                # offset measures num text inputs corresponding to this image
+                # len(offset) = original number of images
                 start_i, end_i = offset[i], offset[i + 1]
                 images_clip_i = (
                     images_clip[i]
-                    .unsqueeze(0)
-                    .expand(end_i - start_i, -1, -1, -1)
+                    .unsqueeze(0)                           # add 1 dimension in front
+                    .expand(end_i - start_i, -1, -1, -1)    # duplicates k number of times in the new dimension
                     .contiguous()
                 )
                 # each images_clip[i] expanded from [3, 224, 224] to [3, 3, 224, 224]
+                #   unsqueeze: [3, 224, 224] --> [1, 3, 224, 224]
+                #   expand:    [1, 3, 224, 224] --> [k, 3, 224, 224]
+                #   concat:    list[(k, 3, 224, 224) x num_imgs] ---> [k * num_imgs, 3, 224, 224]      
                 images_clip_list.append(images_clip_i)
             images_clip = torch.cat(images_clip_list, dim=0)
+            # So now each images_clip[i] corresponds to 1 text input (previously corresponded to multiple)
 
             # Final images clip torch.Size([6, 3, 224, 224])  (batch size went from 2 --> 6)
 

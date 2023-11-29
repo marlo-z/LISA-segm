@@ -5,3 +5,5 @@ dataset
 pretrained_weights
 fake_bbox.py
 test.py
+test_clip.py
+

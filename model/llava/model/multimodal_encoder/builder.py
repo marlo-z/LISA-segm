@@ -1,6 +1,7 @@
 from .clip_encoder import CLIPVisionTower
 
-
+# Creates an instance of custom class CLIPVisonTower, 
+# which contains CLIPVisionModel and CLIPImageProcessor
 def build_vision_tower(vision_tower_cfg, **kwargs):
     vision_tower = getattr(
         vision_tower_cfg,

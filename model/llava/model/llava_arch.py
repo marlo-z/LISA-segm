@@ -31,9 +31,14 @@ class LlavaMetaModel:
     def __init__(self, config):
         super(LlavaMetaModel, self).__init__(config)
 
+        # print("LLAVA META MODEL INIT:")
+        # print("Build vision tower:")
+        # print("Config:", config)
+
         if hasattr(config, "mm_vision_tower"):
             self.vision_tower = build_vision_tower(config, delay_load=True)
             self.mm_projector = nn.Linear(config.mm_hidden_size, config.hidden_size)
+            # build_vision_tower: --> creates CLIPVisionTower (custom class)
 
     def get_vision_tower(self):
         vision_tower = getattr(self, "vision_tower", None)
@@ -49,7 +54,7 @@ class LlavaMetaModel:
 
         self.config.mm_vision_tower = vision_tower
 
-        vision_tower = build_vision_tower(model_args)
+        vision_tower = build_vision_tower(model_args)       # Question: creates vision_tower again? (Already created in __init__)
 
         if fsdp is not None and len(fsdp) > 0:
             self.vision_tower = [vision_tower]
@@ -96,7 +101,41 @@ class LlavaMetaForCausalLM(ABC):
     def encode_images(self, images):
         image_features = self.get_model().get_vision_tower()(images)
         image_features = self.get_model().mm_projector(image_features)
+        '''
+        Vision Tower: CLIPVisionModel Encoder
+        MM Projector: Linear(1024, 5120)
+        1) input images [n, 3, 224, 224]
+        2) CLIP encode features [n, 256, 1024] (patch features)
+        3) projection [n, 256, 5120]
+        '''
+        # print("vision_tower:", self.get_model().get_vision_tower())
+        # print("mm projector:", self.get_model().mm_projector)
+        # print("images:", images.size())
+        # print("image_features:", image_features.size())
         return image_features
+
+    def encode_boxes(self, cropped_boxes):
+        '''
+        cropped_boxes:      [n_imgs, n_boxes, 3, 224, 224]
+        flattened_boxes:    [n_imgs * n_boxes, 3, 224, 224]
+        outputs <-- encode(flattened_boxes)
+        outputs:            [n_imgs * n_boxes, 256, 1024]
+        pooled_features:    [n_imgs * n_boxes, 1024]
+        boxes_features:     [n_imgs * n_boxes, 5120]
+        (unflatten)         [n_imgs, n_boxes, 5120]
+        '''
+        n_imgs, n_boxes = cropped_boxes.size(0), cropped_boxes.size(1)
+        flattened_boxes = cropped_boxes.view(n_imgs * n_boxes, 3, 224, 224)
+        pooled_features = self.get_model().get_vision_tower()(flattened_boxes, pool_features=True)
+        box_features = self.get_model().mm_projector(pooled_features)
+        box_features_per_img = box_features.view(n_imgs, n_boxes, 5120)
+        # print("input boxes:", cropped_boxes.size())
+        # print("reshaped boxes:", flattened_boxes.size())
+        # print("pooled features:", pooled_features.size())
+        # print("projected box features:", box_features.size())
+        # print("reshaped box features:", box_features_per_img.size())
+        # input()
+        return box_features_per_img
 
     def prepare_inputs_labels_for_multimodal(
         self, input_ids, attention_mask, past_key_values, labels, images, box_embeds = None
@@ -116,6 +155,7 @@ class LlavaMetaForCausalLM(ABC):
                 )
             return input_ids, attention_mask, past_key_values, None, labels
 
+        # Question: what is this if-case for?
         if type(images) is list or images.ndim == 5:
             concat_images = torch.cat([image for image in images], dim=0)
             image_features = self.encode_images(concat_images)
@@ -126,16 +166,32 @@ class LlavaMetaForCausalLM(ABC):
             image_features = self.encode_images(images)
             # image_features --> image embeddings, encode image using CLIP (model.vision_tower)
 
+        # CLIP encode cropped boxes --> embeds 
+        n_boxes_per_img = 5
+        fake_cropped_boxes = []
+        for i in range(len(images)):
+            cropped_boxes = torch.from_numpy(
+                np.random.rand(n_boxes_per_img, 3, 224, 224)
+            )
+            fake_cropped_boxes.append(cropped_boxes)
+        fake_cropped_boxes = torch.stack(fake_cropped_boxes, dim=0)
+        # fake cropped boxes: [batch_size, n_boxes, 3, 224, 224]
+
+        box_features = self.encode_boxes(fake_cropped_boxes)
+
         # image_embeds dimension: [6, 256, 5120] -- [bs, n_vec, vec_len]
         # input_ids dimensions: [6, 163]         -- [bs, n_tokens]
 
-        # Append bbox token embeddings for each image
-        # box_embed: [n_images, n_boxes, box_embed_dim]
-        image_features = torch.cat([image_features, box_embeds], dim=1)
+        #### Append bbox token embeddings for each image ####
+        # original image_features: [n_imgs, n_img_tokens=256, vec_dim=5120]
+        # box_features: [n_imgs, n_boxes, embed_dim=5120]
+        # Appended image_features: [n_imgs, img_tokens + box_tokens, embed_dim=5120]
+        
+        image_features = torch.cat([image_features, box_features], dim=1)
+        # print("before", image_features.size())
+        # print("after", image_features.size())
+        # input()
 
-        # image_features: [batch_size=6, n_img_token=256, vec_dim=5120]
-        # box_embeds: [batch_size=6, n_boxes, box_embed_dim=5120]
-        # Appendinged image_features: [batch_size=6, n_img_token + n_boxes, box_embed_dim=5120]
 
         # new_input_embeds will contain image embeddings insertted between text embeddings 
         new_input_embeds = []

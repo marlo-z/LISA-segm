@@ -2,7 +2,8 @@ import torch
 import torch.nn as nn
 from transformers import CLIPImageProcessor, CLIPVisionConfig, CLIPVisionModel
 
-
+# This is a custom class
+# CLIPVisionModel, CLIPImageProcessor is embedded within this class
 class CLIPVisionTower(nn.Module):
     def __init__(self, vision_tower, args, delay_load=False):
         super().__init__()
@@ -29,17 +30,20 @@ class CLIPVisionTower(nn.Module):
         self.is_loaded = True
 
     def feature_select(self, image_forward_outs):
+        # self.select_layer = -2
+        # self.select_feature = "patch"
+
         image_features = image_forward_outs.hidden_states[self.select_layer]
         if self.select_feature == "patch":
-            image_features = image_features[:, 1:]
+            image_features = image_features[:, 1:]  # excludes cls token in front
         elif self.select_feature == "cls_patch":
-            image_features = image_features
+            image_features = image_features         # includes cls token in front
         else:
             raise ValueError(f"Unexpected select feature: {self.select_feature}")
         return image_features
 
     @torch.no_grad()
-    def forward(self, images):
+    def forward(self, images, pool_features=False):
         if type(images) is list:
             image_features = []
             for image in images:
@@ -54,7 +58,13 @@ class CLIPVisionTower(nn.Module):
                 images.to(device=self.device, dtype=self.dtype),
                 output_hidden_states=True,
             )
-            image_features = self.feature_select(image_forward_outs).to(images.dtype)
+            # image_forward_outs: return type BaseModelOuputWithPooling
+
+            # used when encoding cropped boxes --> only return 1 token per box
+            if pool_features:
+                image_features = image_forward_outs.pooler_output     # box features
+            else:
+                image_features = self.feature_select(image_forward_outs).to(images.dtype)
 
         torch.cuda.empty_cache()
         return image_features
