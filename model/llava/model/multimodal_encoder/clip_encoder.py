@@ -33,7 +33,7 @@ class CLIPVisionTower(nn.Module):
         # self.select_layer = -2
         # self.select_feature = "patch"
 
-        image_features = image_forward_outs.hidden_states[self.select_layer]
+        image_features = image_forward_outs.hidden_states[self.select_layer]        # Question: why select 2nd to last layer?
         if self.select_feature == "patch":
             image_features = image_features[:, 1:]  # excludes cls token in front
         elif self.select_feature == "cls_patch":
@@ -62,7 +62,9 @@ class CLIPVisionTower(nn.Module):
 
             # used when encoding cropped boxes --> only return 1 token per box
             if pool_features:
-                image_features = image_forward_outs.pooler_output     # box features
+                image_features = image_forward_outs.pooler_output     
+                # cls embed (last layer hiddent state[0], first token) --> apply linear + tanh activation
+                # see: https://huggingface.co/docs/transformers/model_doc/clip#transformers.CLIPVisionModel
             else:
                 image_features = self.feature_select(image_forward_outs).to(images.dtype)
 

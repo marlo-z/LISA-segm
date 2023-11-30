@@ -64,7 +64,7 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         output_attentions: Optional[bool] = None,
         output_hidden_states: Optional[bool] = None,
         images: Optional[torch.FloatTensor] = None,
-        box_embeds: Optional[torch.FloatTensor] = None,
+        cropped_boxes: Optional[torch.FloatTensor] = None,
         return_dict: Optional[bool] = None,
     ) -> Union[Tuple, CausalLMOutputWithPast]:
         output_attentions = (
@@ -87,12 +87,13 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         # (concats image embedding from CLIP to text embedding, before feeding to LLM)
         (
             input_ids,
-            attention_mask,
+            attention_mask,         # TODO: attention_mask should be updated by now (accounting for padded boxes)
             past_key_values,
             inputs_embeds,
             labels,
         ) = self.prepare_inputs_labels_for_multimodal(
-            input_ids, attention_mask, past_key_values, labels, images, box_embeds
+            input_ids, attention_mask, past_key_values, labels, images, 
+            cropped_boxes
         )
         # decoder outputs consists of (dec_features, layer_state, dec_hidden, dec_attn)
 

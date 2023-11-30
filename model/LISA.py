@@ -164,6 +164,8 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
         # Initialize weights and apply final processing
         self.post_init()
     
+
+    ### Useless now, used project DINO last layer bbox embeding to transformer dimension ###
     def initialize_box_projector(self, params, in_dim):
         out_dim = 5120          # dimension of transformer
 
@@ -193,11 +195,6 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
 
             # print("DEBUG:", "Box Projection layer consists:", modules)
             self.box_projector = nn.Sequential(*modules)
-            # DEBUG: weights data type
-            # for name, param in self.box_projector.named_parameters():
-            #     print(name, param.dtype)
-            # input()
-            # (weights are still float32)
 
             # Question: neccesary?
             self.box_projector.train()
@@ -238,7 +235,7 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
         masks_list: List[torch.FloatTensor],
         label_list: List[torch.Tensor],
         resize_list: List[tuple],
-        box_embeds: torch.FloatTensor, 
+        cropped_boxes: torch.FloatTensor = None, 
         inference: bool = False,
         **kwargs,
     ):
@@ -248,7 +245,7 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
         # input_ids:    torch.Size([6, 186])
         #                          [n_sentences, n_tokens]
         # offset:       [0, 3, 6]  (multiple Q-A pair correspond to same image)
-        # box_embeds: [n_images, n_boxes, box_embed_dim]
+        # cropped_boxes:   [n_images, n_boxes, 3, 224, 224]
 
         # DEBUG: weights data type, somehow got converted to bfloat16 ???
         # (use args.precision = 'bf16' by default)
@@ -264,18 +261,15 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
         # box_embeds: [n_images, n_boxes, transformer_dim (5120)]
 
         # Temp
-        n_boxes = 5
+        n_boxes = cropped_boxes.size(1)
 
+        # print("n boxes:", n_boxes)
+        # print("n text tokens:", input_ids.size())
 
         # image_embeddings = SAM_encoder(images) --> embeddings fed into decoder to generate output mask
         image_embeddings = self.get_visual_embs(images)
         batch_size = image_embeddings.shape[0]
         assert batch_size == len(offset) - 1
-
-        ### DEBUG ###
-        # print("offset", offset)
-        # print("input ids:", input_ids.size())
-        # print(input_ids)
 
         # seg_token_mask used as an index mask later
         seg_token_mask = input_ids[:, 1:] == self.seg_token_idx         # (omit first token)
@@ -292,18 +286,6 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
     
         # concatenate [seg_token_mask:[6, 186], zeros[6, 1]]
         # seg_token_mask 2: torch.Size([6, 187])      (bool)
-
-        # FAKE BBOX TOKENS (for testing)
-        # n_images = images.shape[0]
-        # n_boxes = 100
-        # box_embed_dim = 256
-        # box_embeds = torch.rand(n_images, 
-        #                         n_boxes, 
-        #                         box_embed_dim, 
-        #                         dtype=torch.bfloat16).to("cuda:0")
-        # box_embeds = self.box_projector(box_embeds)
-        # box_embeds: [n_images, n_boxes, box_embed_dim]
-
 
         # hack for IMAGE_TOKEN_INDEX (we suppose that there is only one image, and it is in the front)
         seg_token_mask = torch.cat(
@@ -341,7 +323,7 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
             output = None
 
         else:
-            # Expand images to match text batch size
+            '''expanding batch size to match number of input text'''
             images_clip_list = []
             for i in range(len(offset) - 1):
                 # offset measures num text inputs corresponding to this image
@@ -363,26 +345,36 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
 
             # Final images clip torch.Size([6, 3, 224, 224])  (batch size went from 2 --> 6)
 
-            box_embed_list = []
+            '''expanding batch size to match number of input text'''
+            expanded_boxes_list = []
             for i in range(len(offset) - 1):
                 start_i, end_i = offset[i], offset[i + 1]
-                box_embed_i = (
-                    box_embeds[i]
-                    .unsqueeze(0)                         # add extra dimension in front
-                    .expand(end_i - start_i, -1, -1)      # duplicate in that added dimension
+                boxes_i = (
+                    cropped_boxes[i]
+                    .unsqueeze(0)                                 # add extra dimension in front
+                    .expand(end_i - start_i, -1, -1, -1, -1)      # duplicate in that added dimension
                     .contiguous()
                 )
-                box_embed_list.append(box_embed_i)
-            # print("Original box embeds:", box_embeds.size())
-            box_embeds = torch.cat(box_embed_list, dim=0)
+                expanded_boxes_list.append(boxes_i)
+            
+            expanded_boxes_list = torch.cat(expanded_boxes_list, dim=0)
+
+            # boxes_i (for i-th image in batch):        [n_boxes, 3, 224, 224]
+            # unsqueeze:                                [1, n_boxes, 3, 224, 224]
+            # expand:                                   [k_i, n_boxes, 3, 224, 224]
+            # concat:                                   [k1+...+kn, n_boxes, 3, 224, 224] where k1+...+kn = num of input texts
+            # final expanded_boxes_list:                [text_bs, n_boxes, 3, 224, 224]
 
             # print("Image clip after expanding:", images_clip.size())
-            # print("Box embedding after expanding:", box_embeds.size())
+            # print("Original boxes:", cropped_boxes.size())
+            # print("Boxes after expanding:", expanded_boxes_list.size())
             # input()
+
+            cropped_boxes = expanded_boxes_list
 
             # LlavaLlamaForCausalLM --> forward()
             output = super().forward(
-                box_embeds = box_embeds, 
+                cropped_boxes = cropped_boxes, 
                 images=images_clip,                 # input images: images_clip dimension:
                 attention_mask=attention_masks,
                 input_ids=input_ids,

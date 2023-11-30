@@ -34,31 +34,30 @@ from .vqa_dataset import VQADataset
     padded_embeds_list: [(x, 256), ... ,(x, 256)], x=max(x1,..,xn)
     Therefore, can be stacked into tensor [batch_size, x, 256]
 '''
-def pad_box_embeds(
-    box_embeds_list: List[torch.FloatTensor]
-) -> List[torch.FloatTensor]:
-    embed_dim = 256                     # TODO: more elegent solution
-    max_num_tokens = 0
-    for box_embeds in box_embeds_list:
-        if box_embeds.nelement() == 0:
-            continue
-        num_tokens = box_embeds.size(0)
-        embed_dim = box_embeds.size(1)
-        max_num_tokens = max(num_tokens, max_num_tokens)
+def pad_boxes(boxes_list):
+    # boxes_list: list of cropped n boxes for each image
+    # boxes_list[i]: Tensor(n, 3, 224, 224)
 
-    padded_embeds_list = []
-    for box_embeds in box_embeds_list:
-        if box_embeds.nelement() == 0:
-            padded_embeds = torch.zeros(max_num_tokens, embed_dim)
+    max_num_boxes = 0
+    for boxes in boxes_list:
+        if boxes.nelement() == 0:
+            continue
+        num_boxes = boxes.size(0)
+        max_num_boxes = max(num_boxes, max_num_boxes)
+
+    padded_boxes_list = []
+    for boxes in boxes_list:
+        if boxes.nelement() == 0:
+            padded_boxes = torch.zeros(max_num_boxes, 3, 224, 224) * -1
         else:
-            num_tokens = box_embeds.size(0)
-            padded_embeds = torch.cat([
-                box_embeds, 
-                torch.zeros(max_num_tokens - num_tokens, embed_dim)
+            num_boxes = boxes.size(0)
+            padded_boxes = torch.cat([
+                boxes, 
+                torch.ones(max_num_boxes - num_boxes, 3, 224, 224) * -1         # use -1, and find which token is all -1
             ], dim=0) 
-        padded_embeds_list.append(padded_embeds)
+        padded_boxes_list.append(padded_boxes)
     
-    return padded_embeds_list
+    return padded_boxes_list
         
 # batch = [dataset[i], dataset[j]] <-- chosen by sampler
 #         (dataset[i] will invoke __getitem__ method 
@@ -79,7 +78,7 @@ def collate_fn(
     offset_list = [0]
     cnt = 0
     inferences = []
-    box_embeds_list = []
+    boxes_list = []
     for (
         image_path,
         images,
@@ -90,7 +89,7 @@ def collate_fn(
         resize,
         questions,
         sampled_classes,
-        box_embeds,
+        boxes,
         inference,          # always false (when training), actually not returned by __getitem__ method
                             # box_embeds needs to be placed before this
     ) in batch:
@@ -106,13 +105,18 @@ def collate_fn(
         cnt += len(conversations)
         offset_list.append(cnt)
         inferences.append(inference)
-        box_embeds_list.append(box_embeds)
+        boxes_list.append(boxes)
     
     # box_embeds_list: [(x1, 256), ..., (xn, 256)]
     #                  (each tensor in this list has arbituray number of box tokens)
     # uniformize the len of each tensor:
     #                   [(x, 256), ..., (x,256)] for stacking into batched tensor
-    box_embeds_list = pad_box_embeds(box_embeds_list)
+    boxes_list = pad_boxes(boxes_list)
+    boxes_list = torch.stack(boxes_list, dim=0)
+
+    # boxes_list: Tensor([n_imgs, max_n_boxes, 3, 224, 224])
+
+    # TODO: update attention mask to indicate which box is padded
 
     if use_mm_start_end:
         # replace <image> token
@@ -207,7 +211,7 @@ def collate_fn(
         "sampled_classes_list": sampled_classes_list,
         "inference": inferences[0],
         "conversation_list": conversation_list,
-        "box_embeds": torch.stack(box_embeds_list, dim=0)
+        "cropped_boxes": boxes_list, 
     }
 
 

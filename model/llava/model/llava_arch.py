@@ -114,6 +114,10 @@ class LlavaMetaForCausalLM(ABC):
         # print("image_features:", image_features.size())
         return image_features
 
+    # TODO: add spatial information (bbox coordinate)
+    # mlp(bbox coords) --> [n_boxes, 1024] + add to pooler_output
+    # 2 layers
+    # normalize bbox coords --> [-1, 1]
     def encode_boxes(self, cropped_boxes):
         '''
         cropped_boxes:      [n_imgs, n_boxes, 3, 224, 224]
@@ -138,7 +142,7 @@ class LlavaMetaForCausalLM(ABC):
         return box_features_per_img
 
     def prepare_inputs_labels_for_multimodal(
-        self, input_ids, attention_mask, past_key_values, labels, images, box_embeds = None
+        self, input_ids, attention_mask, past_key_values, labels, images, cropped_boxes = None
     ):
         vision_tower = self.get_vision_tower()
         if vision_tower is None or images is None or input_ids.shape[1] == 1:
@@ -166,30 +170,21 @@ class LlavaMetaForCausalLM(ABC):
             image_features = self.encode_images(images)
             # image_features --> image embeddings, encode image using CLIP (model.vision_tower)
 
+
         # CLIP encode cropped boxes --> embeds 
-        n_boxes_per_img = 5
-        fake_cropped_boxes = []
-        for i in range(len(images)):
-            cropped_boxes = torch.from_numpy(
-                np.random.rand(n_boxes_per_img, 3, 224, 224)
-            )
-            fake_cropped_boxes.append(cropped_boxes)
-        fake_cropped_boxes = torch.stack(fake_cropped_boxes, dim=0)
-        # fake cropped boxes: [batch_size, n_boxes, 3, 224, 224]
-
-        box_features = self.encode_boxes(fake_cropped_boxes)
-
-        # image_embeds dimension: [6, 256, 5120] -- [bs, n_vec, vec_len]
-        # input_ids dimensions: [6, 163]         -- [bs, n_tokens]
+        # input:        cropped images [n_imgs, n_boxes, 3, 224, 224]
+        # output:       box features   [n_imgs, n_boxes, 5120]
+        box_features = self.encode_boxes(cropped_boxes)
 
         #### Append bbox token embeddings for each image ####
         # original image_features: [n_imgs, n_img_tokens=256, vec_dim=5120]
         # box_features: [n_imgs, n_boxes, embed_dim=5120]
         # Appended image_features: [n_imgs, img_tokens + box_tokens, embed_dim=5120]
         
+        
         image_features = torch.cat([image_features, box_features], dim=1)
-        # print("before", image_features.size())
-        # print("after", image_features.size())
+        # print("before adding box features", image_features.size())
+        # print("after adding box features", image_features.size())
         # input()
 
 
@@ -420,6 +415,9 @@ class LlavaMetaForCausalLM(ABC):
                 )
                 assert attention_mask.shape == new_input_embeds.shape[:2]
 
+        # TODO: update attention_mask
+        # [batch, n_toks, dim]
+        # new_input_embeds --> find which tokens is padded (all -1)
         return None, attention_mask, past_key_values, new_input_embeds, new_labels
 
     # def initialize_vision_tokenizer(self, model_args, tokenizer):

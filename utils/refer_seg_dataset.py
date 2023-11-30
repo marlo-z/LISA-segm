@@ -1,5 +1,6 @@
 import os
 import random
+import json
 
 import cv2
 import numpy as np
@@ -45,14 +46,22 @@ class ReferSegDataset(torch.utils.data.Dataset):
         self.transform = ResizeLongestSide(image_size)
         self.clip_image_processor = CLIPImageProcessor.from_pretrained(vision_tower)
 
+        self.bbox_dir = os.path.join(base_image_dir, "refer_seg", "bbox", "train")
+
         self.short_question_list = SHORT_QUESTION_LIST
         self.answer_list = ANSWER_LIST
+
+        # TODO: temp fix
+        # temporarily removing refclef (which uses saipr)
+        # removing refcoco+ and refcocog as well
+        refer_seg_data = "refcoco||refcoco+||refcocog"
 
         DATA_DIR = os.path.join(base_image_dir, "refer_seg")
         self.refer_seg_ds_list = refer_seg_data.split(
             "||"
         )  # ['refclef', 'refcoco', 'refcoco+', 'refcocog']
         self.refer_seg_data = {}
+
         for ds in self.refer_seg_ds_list:
             if ds == "refcocog":
                 splitBy = "umd"
@@ -79,7 +88,7 @@ class ReferSegDataset(torch.utils.data.Dataset):
                     )
                 else:
                     item["file_name"] = os.path.join(
-                        DATA_DIR, "images/mscoco/images/train2014", item["file_name"]
+                        DATA_DIR, "images/mscoco/images/train2014", item["file_name"]      
                     )
                 refer_seg_ds["images"].append(item)
             refer_seg_ds["annotations"] = refer_api.Anns  # anns_train
@@ -100,6 +109,29 @@ class ReferSegDataset(torch.utils.data.Dataset):
                     ref,
                 ]
             refer_seg_ds["img2refs"] = img2refs
+
+            # print()
+            # print("Initializating dataset:")
+            # print(ds)
+            # print(refer_seg_ds.keys())
+            # print("images", refer_seg_ds['images'][0])
+            # print("annotations", refer_seg_ds['annotations'].keys())
+            # print("img2refs", refer_seg_ds['img2refs'].keys())
+            # print()
+            # input()
+
+            '''
+            refer_seg_ds:
+                - images
+                    - file_path
+                    - id
+                    - height
+                    - width
+                - annotations
+                - img2refs
+
+            '''
+
             self.refer_seg_data[ds] = refer_seg_ds
 
     def __len__(self):
@@ -116,6 +148,34 @@ class ReferSegDataset(torch.utils.data.Dataset):
         padw = self.img_size - w
         x = F.pad(x, (0, padw, 0, padh))
         return x
+
+    def load_bbox(self, image_path):
+        
+        image_name = image_path.split("/")[-1]
+        box_name = image_name.replace("jpg", "json")
+        boxes_path = os.path.join(self.bbox_dir, box_name)
+
+        # print("DEBUG:")
+        # print("image_path", image_path)
+        # print("image name", image_name)
+        # print("box path", boxes_path)
+
+        with open(boxes_path) as f:
+            annotations = json.load(f)
+            boxes = annotations["bbox"]
+
+        # print("bbox list:", boxes)
+        return boxes
+
+    def crop_bbox(self, image, boxes):
+        cropped_boxes = []
+        for bbox in boxes:
+            x, y, w, h = [round(x) for x in bbox]
+            cropped = image[y:y+h, x:x+h]
+            cropped_boxes.append(cropped)
+            # print("cropped", cropped.shape)           # some cropped boxes are very small
+
+        return cropped_boxes
 
     def __getitem__(self, idx):
         ds = random.randint(0, len(self.refer_seg_ds_list) - 1)
@@ -149,13 +209,35 @@ class ReferSegDataset(torch.utils.data.Dataset):
         # sampled_ann_ids = np.vectorize(ann_ids.__getitem__)(sampled_inds).tolist()
         sampled_ann_ids = [ann_ids[ind] for ind in sampled_inds]
         sampled_classes = sampled_sents
+
+        # print("DEBUG: image_path", image_path)
+        # TODO: temp hacky fix
+        if "COCO_train2014_" in image_path:
+            image_path = image_path.replace("COCO_train2014_", "")
+
         image = cv2.imread(image_path)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+
+        bbox = self.load_bbox(image_path)
+        cropped_boxes_list = self.crop_bbox(image, bbox)
+
 
         # preprocess image for clip
         image_clip = self.clip_image_processor.preprocess(image, return_tensors="pt")[
             "pixel_values"
         ][0]
+
+        # image: (height, width, 3) --> Tensor(3, 224, 224) 
+
+        # preprocess cropped images based on bbox for clip
+        for i, cropped_box in enumerate(cropped_boxes_list):
+            cropped_boxes_list[i] = self.clip_image_processor.preprocess(
+                image, return_tensors="pt"
+            )["pixel_values"][0]
+
+        cropped_boxes_list = torch.stack(cropped_boxes_list, dim=0)
+        # for each image:
+        # cropped_boxes_list: Tensor(n_boxes, 3, 224, 224)
 
         image = self.transform.apply_image(image)  # preprocess image for sam
         resize = image.shape[:2]
@@ -274,5 +356,5 @@ class ReferSegDataset(torch.utils.data.Dataset):
             resize,
             questions,
             sampled_classes,
-            # box tokens/embeddings
+            cropped_boxes_list,
         )
