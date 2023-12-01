@@ -105,7 +105,8 @@ def parse_args(args):
         type=str,
         choices=["llava_v1", "llava_llama_2"],
     )
-    parser.add_argument("--box_projector_params", default="linear", type=str)
+    # Un-used (used to be for projecting last layer box embeddings)
+    # parser.add_argument("--box_projector_params", default="linear", type=str)
     parser.add_argument("--dev", action="store_true", default=False)
     return parser.parse_args(args)
 
@@ -138,7 +139,7 @@ def main(args):
         )
 
     ### TODO:
-    box_embed_dim = 256
+    # box_embed_dim = 256
 
     model_args = {
         "train_mask_decoder": args.train_mask_decoder,
@@ -150,8 +151,8 @@ def main(args):
         "vision_pretrained": args.vision_pretrained,
         "vision_tower": args.vision_tower,
         "use_mm_start_end": args.use_mm_start_end,
-        "box_projector_params": args.box_projector_params,
-        "box_embed_dim": box_embed_dim
+        # "box_projector_params": args.box_projector_params,
+        # "box_embed_dim": box_embed_dim
     }
     torch_dtype = torch.float32
     if args.precision == "bf16":

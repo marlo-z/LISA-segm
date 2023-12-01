@@ -219,6 +219,7 @@ class LlavaMetaForCausalLM(ABC):
         # input:        cropped images [n_imgs, n_boxes, 3, 224, 224]
         # output:       box features   [n_imgs, n_boxes, 5120]
         box_features = self.encode_boxes(cropped_boxes)
+        # print("box features:", box_features.shape)
 
         #### Append bbox token embeddings for each image ####
         # original image_features: [n_imgs, n_img_tokens=256, vec_dim=5120]

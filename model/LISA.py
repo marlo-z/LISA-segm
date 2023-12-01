@@ -156,10 +156,11 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
 
         self.lm_head = nn.Linear(config.hidden_size, config.vocab_size, bias=False)
 
+        ### Un-used ###
         # Box projector: MLP layer projecting box embedding dimension --> transformer dimension
-        box_proj_params = kwargs.pop("box_projector_params")
-        box_embed_dim = kwargs.pop("box_embed_dim")
-        self.initialize_box_projector(box_proj_params, box_embed_dim)
+        # box_proj_params = kwargs.pop("box_projector_params")
+        # box_embed_dim = kwargs.pop("box_embed_dim")
+        # self.initialize_box_projector(box_proj_params, box_embed_dim)
 
         # Initialize weights and apply final processing
         self.post_init()

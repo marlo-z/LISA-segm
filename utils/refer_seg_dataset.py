@@ -51,10 +51,12 @@ class ReferSegDataset(torch.utils.data.Dataset):
         self.short_question_list = SHORT_QUESTION_LIST
         self.answer_list = ANSWER_LIST
 
-        # TODO: temp fix
+        # TODO: 
         # temporarily removing refclef (which uses saipr)
         # removing refcoco+ and refcocog as well
-        refer_seg_data = "refcoco||refcoco+||refcocog"
+        # refer_seg_data = "refcoco||refcoco+||refcocog"
+
+        refer_seg_data = "refcoco"
 
         DATA_DIR = os.path.join(base_image_dir, "refer_seg")
         self.refer_seg_ds_list = refer_seg_data.split(
@@ -150,7 +152,6 @@ class ReferSegDataset(torch.utils.data.Dataset):
         return x
 
     def load_bbox(self, image_path):
-        
         image_name = image_path.split("/")[-1]
         box_name = image_name.replace("jpg", "json")
         boxes_path = os.path.join(self.bbox_dir, box_name)
@@ -165,17 +166,40 @@ class ReferSegDataset(torch.utils.data.Dataset):
             boxes = annotations["bbox"]
 
         # print("bbox list:", boxes)
-        return boxes
+        return boxes, annotations, image_name.replace(".jpg", "")
 
     def crop_bbox(self, image, boxes):
+        # TODO: temp
+        min_size = 400
+
         cropped_boxes = []
         for bbox in boxes:
             x, y, w, h = [round(x) for x in bbox]
-            cropped = image[y:y+h, x:x+h]
+
+            # TODO: add a filter to ignore objects that are too small
+            if w * h < min_size:
+                continue
+
+            cropped = image[y:y+h, x:x+w]
             cropped_boxes.append(cropped)
             # print("cropped", cropped.shape)           # some cropped boxes are very small
 
         return cropped_boxes
+
+    def test_cropping(self, image, cropped_images, annotations, image_name):
+        test_cropping_dir = "./test_cropping"
+        image_dir = os.path.join(test_cropping_dir, image_name)
+        if not os.path.exists(image_dir):
+            os.makedirs(image_dir)
+        
+        image_path = os.path.join(image_dir, image_name + ".jpg")
+        cv2.imwrite(image_path, image)
+
+        for i, instance in enumerate(annotations["category_id"]):
+            instance_name = instance + ".jpg"
+            instance_path = os.path.join(image_dir, instance_name)
+            cv2.imwrite(instance_path, cropped_images[i])
+
 
     def __getitem__(self, idx):
         ds = random.randint(0, len(self.refer_seg_ds_list) - 1)
@@ -218,9 +242,11 @@ class ReferSegDataset(torch.utils.data.Dataset):
         image = cv2.imread(image_path)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
 
-        bbox = self.load_bbox(image_path)
+        bbox, instance_anns, image_name = self.load_bbox(image_path)
         cropped_boxes_list = self.crop_bbox(image, bbox)
 
+        # testing cropping
+        # self.test_cropping(image, cropped_boxes_list, instance_anns, image_name)
 
         # preprocess image for clip
         image_clip = self.clip_image_processor.preprocess(image, return_tensors="pt")[

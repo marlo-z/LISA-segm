@@ -7,3 +7,5 @@ fake_bbox.py
 test.py
 test_clip.py
 test_pad_mask.py
+test_*.py
+test_cropping
