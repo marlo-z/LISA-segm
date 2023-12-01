@@ -364,10 +364,13 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
             # expand:                                   [k_i, n_boxes, 3, 224, 224]
             # concat:                                   [k1+...+kn, n_boxes, 3, 224, 224] where k1+...+kn = num of input texts
             # final expanded_boxes_list:                [text_bs, n_boxes, 3, 224, 224]
+            # NOTE: each image's boxes will be will be duplicated k_i times, placed contiguously in the final tensor
+            #       (as if there were k_i identical images with the exact same bboxes)
 
             # print("Image clip after expanding:", images_clip.size())
             # print("Original boxes:", cropped_boxes.size())
             # print("Boxes after expanding:", expanded_boxes_list.size())
+            # print()
             # input()
 
             cropped_boxes = expanded_boxes_list

@@ -121,26 +121,70 @@ class LlavaMetaForCausalLM(ABC):
     def encode_boxes(self, cropped_boxes):
         '''
         cropped_boxes:      [n_imgs, n_boxes, 3, 224, 224]
-        flattened_boxes:    [n_imgs * n_boxes, 3, 224, 224]
-        outputs <-- encode(flattened_boxes)
+        linearize_boxes:    [n_imgs * n_boxes, 3, 224, 224]
+        outputs <-- encode(linearize_boxes)
         outputs:            [n_imgs * n_boxes, 256, 1024]
         pooled_features:    [n_imgs * n_boxes, 1024]
         boxes_features:     [n_imgs * n_boxes, 5120]
-        (unflatten)         [n_imgs, n_boxes, 5120]
+        (re-batch)          [n_imgs, n_boxes, 5120]
         '''
         n_imgs, n_boxes = cropped_boxes.size(0), cropped_boxes.size(1)
-        flattened_boxes = cropped_boxes.view(n_imgs * n_boxes, 3, 224, 224)
-        pooled_features = self.get_model().get_vision_tower()(flattened_boxes, pool_features=True)
+        #print("n_images, n_boxes", n_imgs, n_boxes)
+
+        linearize_boxes = cropped_boxes.view(n_imgs * n_boxes, 3, 224, 224)
+        pooled_features = self.get_model().get_vision_tower()(linearize_boxes, pool_features=True)
         box_features = self.get_model().mm_projector(pooled_features)
-        box_features_per_img = box_features.view(n_imgs, n_boxes, 5120)
+        box_features = box_features.view(n_imgs, n_boxes, 5120)
+
+
+        # TODO: extract a mask for identifying which boxes are pads
+        '''
+        cropped_boxes:       [n_imgs, n_boxes, 3, 224, 224]
+        flattened_imgs:      [n_imgs, n_boxes, 3*224*224]
+        padding_mask:        [n_imgs, n_boxes]                  padding_mask[i][j] = True, if ith image, jth box is padded all -1's
+        box_features:        [n_imgs, n_boxes, 5120]            boxes_features[padding_mask] =set= all -1
+        '''
+        # extract padding mask
+        flattened_imgs = cropped_boxes.view(n_imgs, n_boxes, 3*224*224)
+        pad = torch.ones(3*224*224).cuda() * -1
+        padding_mask = torch.all(flattened_imgs == pad, dim = 2)
+        
+        # set embeddings of padded imgs to all -1's  
+        new_pad = (torch.ones(5120) * -1).cuda().to(box_features.dtype)
+        box_features[padding_mask] = new_pad
+
+        ### check ###
+        # positions in box_features where embedding is all -1's matches 
+        # positions in cropped_boxs where padded imgs are all -1's
+        embeds_padding_mask = torch.all(box_features == new_pad, dim=2)
+        # print("cropped_boxes padding mask:", padding_mask.nonzero())
+        # print("box_features padding mask:", embeds_padding_mask.nonzero())
+        # print("num padded embeds:", len(embeds_padding_mask.nonzero()))
+        # assert torch.all(embeds_padding_mask == padding_mask).item() 
+        # input()
+
+        # TODO: set the features corresponding to the padded boxes to -1, using mask
+        # NOTE: each of the (n_imgs * n_boxes) cropped images will be encoded independently,
+        #       therefore, real imgs won't be mixed with padded imgs
+        #       however, sometimes ~10 imgs could be padded, thus creating a lot of overhead
+        
+
         # print("input boxes:", cropped_boxes.size())
-        # print("reshaped boxes:", flattened_boxes.size())
+        # print("reshaped boxes:", linearize_boxes.size())
         # print("pooled features:", pooled_features.size())
         # print("projected box features:", box_features.size())
-        # print("reshaped box features:", box_features_per_img.size())
+        # print("reshaped box features:", box_features.size())
         # input()
-        return box_features_per_img
+        return box_features
 
+    ''' 
+    Encode input text, images, cropped boxes into embeddings are merge them
+    (encode) images           [batch, 3, 224, 224]             -->     image_embeds [batch, 256, 5120]
+    (encode) cropped_boxes    [batch, n_boxes, 3, 224, 224]    -->     box_embeds   [batch, n_boxes, 5120]
+    (concat) image_features   [batch, img_embeds + box_embeds, 5102]
+    (encode) input_ids   -->  text_embeds
+    (concat) new_input_embeds [batch, img_embeds + box_embeds + text_embeds, 5210]
+    '''
     def prepare_inputs_labels_for_multimodal(
         self, input_ids, attention_mask, past_key_values, labels, images, cropped_boxes = None
     ):
@@ -416,9 +460,44 @@ class LlavaMetaForCausalLM(ABC):
                 assert attention_mask.shape == new_input_embeds.shape[:2]
 
         # TODO: update attention_mask
-        # [batch, n_toks, dim]
+        # attention mask: [batch, n_tokens] --> atten_mask[:, i] = True if i-th token is not a pad token
         # new_input_embeds --> find which tokens is padded (all -1)
-        return None, attention_mask, past_key_values, new_input_embeds, new_labels
+
+        '''
+        new_input_embeds:           [batch_size, n_embeds, 5120]      (n_embeds include img_embeds, box_embeds, text_embeds)
+        attention_mask:             [batch_size, n_embeds]
+        padding_mask:               [batch_size, n_embeds]            (mask[i, j] = True <-> ith example's jth token is a padded box_embed all -1's)
+        '''
+
+        # extract padding mask (positions where embeddings of padded boxes are all -1)
+        pad = (torch.ones(5120) * -1).cuda()
+        padding_mask = torch.all(new_input_embeds == pad, dim = 2)
+        # print("final input embeds padding tokens:", len(padding_mask.nonzero()))
+
+        # print("attention mask dim:", attention_mask.shape)
+        # print("padding mask dim:", padding_mask.shape)
+
+        ''' 
+        update attention:
+        if padding_mask[i, j] = True:
+              --> input_embeds[i, j] = embed of padded box 
+              --> attention_mask[i, j] <- False
+        otherwise: 
+              --> keep same
+        '''
+        _false = torch.zeros_like(attention_mask).bool().cuda()
+        updated_attention_mask = torch.where(padding_mask, _false, attention_mask)
+
+        ### check ###
+        # total_num_tokens = attention_mask.size(0) * attention_mask.size(1)
+        # num_pad_tokens = total_num_tokens - len(attention_mask.nonzero())
+        # new_num_pad_tokens = total_num_tokens - len(updated_attention_mask.nonzero())
+        # num_pad_boxes = len(torch.all(box_features == pad, dim = 2).nonzero())
+        # print("previous pad tokens:", num_pad_tokens)
+        # print("new pad tokens:", new_num_pad_tokens)
+        # print("num pad boxes:", num_pad_boxes)
+
+        return None, updated_attention_mask, past_key_values, new_input_embeds, new_labels
 
     # def initialize_vision_tokenizer(self, model_args, tokenizer):
     def initialize_vision_tokenizer(self, model_args, num_new_tokens):

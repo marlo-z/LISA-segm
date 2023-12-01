@@ -36,7 +36,8 @@ from .vqa_dataset import VQADataset
 '''
 def pad_boxes(boxes_list):
     # boxes_list: list of cropped n boxes for each image
-    # boxes_list[i]: Tensor(n, 3, 224, 224)
+    # boxes_list[i]: Tensor(n, 3, 224, 224), where n is different for each i-th image
+    # padded such that for each image, num boxes is same [n_pad, 3, 224, 244]
 
     max_num_boxes = 0
     for boxes in boxes_list:
@@ -46,7 +47,7 @@ def pad_boxes(boxes_list):
         max_num_boxes = max(num_boxes, max_num_boxes)
 
     padded_boxes_list = []
-    for boxes in boxes_list:
+    for i, boxes in enumerate(boxes_list):
         if boxes.nelement() == 0:
             padded_boxes = torch.zeros(max_num_boxes, 3, 224, 224) * -1
         else:
@@ -57,6 +58,16 @@ def pad_boxes(boxes_list):
             ], dim=0) 
         padded_boxes_list.append(padded_boxes)
     
+    # print("before pad:", [boxes.shape for boxes in boxes_list])
+    # print("afer pad:", [boxes.shape for boxes in padded_boxes_list])
+    # detected = []
+    # for i, boxes in enumerate(padded_boxes_list):
+    #     flatten = boxes.view(boxes.size(0), -1)
+    #     pad = torch.ones(3*224*224) *-1
+    #     mask = torch.all(flatten == pad, dim = 1)
+    #     detected.append([f"image {i} padded:", mask.nonzero()])
+    # print("Detected padded tokens:", detected)
+
     return padded_boxes_list
         
 # batch = [dataset[i], dataset[j]] <-- chosen by sampler
@@ -113,6 +124,14 @@ def collate_fn(
     #                   [(x, 256), ..., (x,256)] for stacking into batched tensor
     boxes_list = pad_boxes(boxes_list)
     boxes_list = torch.stack(boxes_list, dim=0)
+
+    ### Check padded images mask
+    batch_size, n_boxes = boxes_list.size(0), boxes_list.size(1)
+    flatten = boxes_list.view(batch_size, n_boxes, -1)
+    pad = torch.ones(3*224*224) * -1
+    mask = torch.all(flatten == pad, dim = 2)
+    # print("batch size, n_boxes", batch_size, n_boxes)
+    # print("Padded boxes for each image:", mask.nonzero())
 
     # boxes_list: Tensor([n_imgs, max_n_boxes, 3, 224, 224])
 
