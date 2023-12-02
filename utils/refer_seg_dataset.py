@@ -34,6 +34,7 @@ class ReferSegDataset(torch.utils.data.Dataset):
         num_classes_per_sample: int = 3,
         exclude_val=False,
         refer_seg_data="refclef||refcoco||refcoco+||refcocog",
+        box_min_size=400,
     ):
         self.exclude_val = exclude_val
         self.samples_per_epoch = samples_per_epoch
@@ -51,12 +52,7 @@ class ReferSegDataset(torch.utils.data.Dataset):
         self.short_question_list = SHORT_QUESTION_LIST
         self.answer_list = ANSWER_LIST
 
-        # TODO: 
-        # temporarily removing refclef (which uses saipr)
-        # removing refcoco+ and refcocog as well
-        # refer_seg_data = "refcoco||refcoco+||refcocog"
-
-        refer_seg_data = "refcoco"
+        self.box_min_size = box_min_size
 
         DATA_DIR = os.path.join(base_image_dir, "refer_seg")
         self.refer_seg_ds_list = refer_seg_data.split(
@@ -169,15 +165,14 @@ class ReferSegDataset(torch.utils.data.Dataset):
         return boxes, annotations, image_name.replace(".jpg", "")
 
     def crop_bbox(self, image, boxes):
-        # TODO: temp
-        min_size = 400
+        # print("DEBUG: box min size", self.box_min_size)
 
         cropped_boxes = []
         for bbox in boxes:
             x, y, w, h = [round(x) for x in bbox]
 
-            # TODO: add a filter to ignore objects that are too small
-            if w * h < min_size:
+            # filter to ignore objects that are too small
+            if w * h < self.box_min_size:
                 continue
 
             cropped = image[y:y+h, x:x+w]

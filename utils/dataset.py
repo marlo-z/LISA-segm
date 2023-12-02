@@ -257,6 +257,7 @@ class HybridDataset(torch.utils.data.Dataset):
         vqa_data="llava_instruct_150k",
         reason_seg_data="ReasonSeg|train",
         explanatory=0.1,
+        box_min_size=400
     ):
         self.exclude_val = exclude_val
         self.dataset = dataset
@@ -301,6 +302,7 @@ class HybridDataset(torch.utils.data.Dataset):
                         num_classes_per_sample,
                         exclude_val,
                         refer_seg_data,
+                        box_min_size,
                     )
                 )
             elif dataset == "vqa":

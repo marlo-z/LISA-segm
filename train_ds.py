@@ -108,6 +108,9 @@ def parse_args(args):
     # Un-used (used to be for projecting last layer box embeddings)
     # parser.add_argument("--box_projector_params", default="linear", type=str)
     parser.add_argument("--dev", action="store_true", default=False)
+
+    parser.add_argument("--box_min_size", default=400, type=int)
+
     return parser.parse_args(args)
 
 
@@ -267,6 +270,7 @@ def main(args):
         vqa_data=args.vqa_data,
         reason_seg_data=args.reason_seg_data,
         explanatory=args.explanatory,
+        box_min_size = args.box_min_size
     )
 
     if args.no_eval == False:
