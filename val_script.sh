@@ -5,9 +5,12 @@ deepspeed --include=localhost:0 --master_port=24999 train_ds.py \
   --dataset_dir='./dataset' \
   --vision_pretrained="./pretrained_weights/sam_vit_h_4b8939.pth" \
   --dataset="refer_seg" \
+  --val_dataset="refcoco|unc|val" \
   --sample_rates="1" \
-  --exp_name="lisa++" \
+  --exp_name="test-lisa" \
   --refer_seg_data="refcoco" \
   --box_min_size=400 \
-  --refcoco_image=2014 \
+  --eval_only \
+  --refcoco_image=2017 \
   --refcoco_bbox=2017 \
+  --dev \

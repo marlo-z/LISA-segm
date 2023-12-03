@@ -111,6 +111,9 @@ def parse_args(args):
 
     parser.add_argument("--box_min_size", default=400, type=int)
 
+    parser.add_argument("--refcoco_images", default=2014, type=int)
+    parser.add_argument("--refcoco_bbox", default=2014, type=int)
+
     return parser.parse_args(args)
 
 
@@ -280,6 +283,9 @@ def main(args):
             args.vision_tower,
             args.val_dataset,
             args.image_size,
+            box_min_size = args.box_min_size,
+            refcoco_images=args.refcoco_images,
+            refcoco_bbox=args.refcoco_bbox,
         )
         print(
             f"Training with {len(train_dataset)} examples and validating with {len(val_dataset)} examples."

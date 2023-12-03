@@ -3,6 +3,8 @@ import os
 import random
 from typing import List
 
+import json
+
 import cv2
 import numpy as np
 import torch
@@ -135,7 +137,7 @@ def collate_fn(
 
     # boxes_list: Tensor([n_imgs, max_n_boxes, 3, 224, 224])
 
-    # TODO: update attention mask to indicate which box is padded
+    # update attention mask to indicate which box is padded
 
     if use_mm_start_end:
         # replace <image> token
@@ -358,9 +360,17 @@ class ValDataset(torch.utils.data.Dataset):
         vision_tower,
         val_dataset,
         image_size=1024,
+        box_min_size=400,
+        refcoco_images=2014,
+        refcoco_bbox=2014,
     ):
+        # TODO: temp fix
+        # base_images_dir = ./dataset/refer_seg
+        base_image_dir = os.path.join(base_image_dir, "refer_seg")
         self.base_image_dir = base_image_dir
         splits = val_dataset.split("|")
+        print("base_image_dir:", base_image_dir)
+        print("splits:", splits)
         if len(splits) == 2:
             ds, split = splits
             images = glob.glob(
@@ -369,6 +379,7 @@ class ValDataset(torch.utils.data.Dataset):
             self.images = images
             self.data_type = "reason_seg"
         elif len(splits) == 3:
+            # ds=refcoco, splitBy="unc", split=val
             ds, splitBy, split = splits
             refer_api = REFER(self.base_image_dir, ds, splitBy)
             ref_ids_val = refer_api.getRefIds(split=split)
@@ -402,6 +413,12 @@ class ValDataset(torch.utils.data.Dataset):
             self.refer_seg_ds = refer_seg_ds
             self.data_type = "refer_seg"
 
+        # base_images_dir = ./dataset/refer_seg
+        self.bbox_dir = os.path.join(base_image_dir, "bbox", "val")
+        self.box_min_size = box_min_size
+        self.refcoco_images = refcoco_images
+        self.refcoco_bbox = refcoco_bbox
+
         self.ds = ds
         self.image_size = image_size
         self.tokenizer = tokenizer
@@ -425,6 +442,44 @@ class ValDataset(torch.utils.data.Dataset):
         padw = self.img_size - w
         x = F.pad(x, (0, padw, 0, padh))
         return x
+    
+    def load_bbox(self, image_path):
+        image_name = image_path.split("/")[-1]
+        box_name = image_name.replace("jpg", "json")
+        boxes_path = os.path.join(self.bbox_dir, box_name)
+
+        print("Load BBOX:")
+        print("image_path", image_path)
+        print("image name", image_name)
+        print("box_name", box_name)
+        print("box path", boxes_path)
+
+        if not os.path.exists(boxes_path):
+            return []
+
+        with open(boxes_path) as f:
+            annotations = json.load(f)
+            boxes = annotations["bbox"]
+
+        # print("bbox list:", boxes)
+        return boxes
+    
+    def crop_bbox(self, image, boxes):
+        # print("DEBUG: box min size", self.box_min_size)
+
+        cropped_boxes = []
+        for bbox in boxes:
+            x, y, w, h = [round(x) for x in bbox]
+
+            # filter to ignore objects that are too small
+            if w * h < self.box_min_size:
+                continue
+
+            cropped = image[y:y+h, x:x+w]
+            cropped_boxes.append(cropped)
+            # print("cropped", cropped.shape)           # some cropped boxes are very small
+
+        return cropped_boxes
 
     def __getitem__(self, idx):
         if self.data_type == "refer_seg":
@@ -436,6 +491,13 @@ class ValDataset(torch.utils.data.Dataset):
             image_info = images[idx]
             image_path = image_info["file_name"]
             image_id = image_info["id"]
+
+            # TODO: Temp fix
+            if self.refcoco_images == 2017:
+                image_path = image_path.replace("COCO_train2014_", "")
+
+            # print("DEBUG:")
+            # print("image path:", image_path)
 
             refs = img2refs[image_id]
             if len(refs) == 0:
@@ -460,6 +522,9 @@ class ValDataset(torch.utils.data.Dataset):
             json_path = image_path.replace(".jpg", ".json")
             mask_json, sampled_sents, is_sentence = get_mask_from_json(json_path, image)
             sampled_sents = [sampled_sents[0]]
+
+        bbox = self.load_bbox(image_path)
+        cropped_boxes_list = self.crop_bbox(image, bbox)
 
         conversations = []
         conv = conversation_lib.default_conversation.copy()
@@ -490,6 +555,18 @@ class ValDataset(torch.utils.data.Dataset):
         image_clip = self.clip_image_processor.preprocess(image, return_tensors="pt")[
             "pixel_values"
         ][0]
+
+        for i, cropped_box in enumerate(cropped_boxes_list):
+            cropped_boxes_list[i] = self.clip_image_processor.preprocess(
+                cropped_box, return_tensors="pt"
+            )["pixel_values"][0]
+
+        if len(cropped_boxes_list) == 0:
+            cropped_boxes_list = torch.tensor([])
+        else:
+            cropped_boxes_list = torch.stack(cropped_boxes_list, dim=0)
+        # cropped_boxes_list: Tensor(n_boxes, 3, 224, 224)
+
 
         # preprocess image for sam
         image = self.transform.apply_image(image)
@@ -536,7 +613,8 @@ class ValDataset(torch.utils.data.Dataset):
             masks,
             labels,
             resize,
-            None,
-            None,
+            None,       # questions (train)
+            None,       # sampled_classes (train)
+            cropped_boxes_list,
             inference,
         )

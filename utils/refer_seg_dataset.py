@@ -229,9 +229,8 @@ class ReferSegDataset(torch.utils.data.Dataset):
         sampled_ann_ids = [ann_ids[ind] for ind in sampled_inds]
         sampled_classes = sampled_sents
 
-        # print("DEBUG: image_path", image_path)
         # TODO: temp hacky fix
-        if "COCO_train2014_" in image_path:
+        if self.refcoco_images == 2017:
             image_path = image_path.replace("COCO_train2014_", "")
 
         image = cv2.imread(image_path)
@@ -253,7 +252,7 @@ class ReferSegDataset(torch.utils.data.Dataset):
         # preprocess cropped images based on bbox for clip
         for i, cropped_box in enumerate(cropped_boxes_list):
             cropped_boxes_list[i] = self.clip_image_processor.preprocess(
-                image, return_tensors="pt"
+                cropped_box, return_tensors="pt"
             )["pixel_values"][0]
 
         cropped_boxes_list = torch.stack(cropped_boxes_list, dim=0)

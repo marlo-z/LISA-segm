@@ -9,4 +9,8 @@ deepspeed --include=localhost:0 --master_port=24999 train_ds.py \
   --exp_name="test-lisa" \
   --refer_seg_data="refcoco" \
   --box_min_size=400 \
+  --refcoco_image=2017 \
+  --refcoco_bbox=2017 \
   --dev
+
+# coco 2017 version: does not contain "COCO_train2014_" before the image file name .jpg
