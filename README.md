@@ -21,6 +21,7 @@ In the root directory of this repo, create the following directory structure
 │   │   |   └── 'refs(unc).p'
 │   │   ├── bbox
 │   │   |   └── train
+│   │   |   └── val
 
 ```
 `bbox/train`: this directory should contain all the `.json` files from `/shared/kkkhanl/train` located on the Berkeley cluster.
