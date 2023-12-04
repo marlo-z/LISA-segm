@@ -35,6 +35,8 @@ class ReferSegDataset(torch.utils.data.Dataset):
         exclude_val=False,
         refer_seg_data="refclef||refcoco||refcoco+||refcocog",
         box_min_size=400,
+        refcoco_images=2014,
+        refcoco_bbox=2014,
     ):
         self.exclude_val = exclude_val
         self.samples_per_epoch = samples_per_epoch
@@ -53,6 +55,8 @@ class ReferSegDataset(torch.utils.data.Dataset):
         self.answer_list = ANSWER_LIST
 
         self.box_min_size = box_min_size
+        self.refcoco_images = refcoco_images
+        self.refcoco_bbox = refcoco_bbox
 
         DATA_DIR = os.path.join(base_image_dir, "refer_seg")
         self.refer_seg_ds_list = refer_seg_data.split(

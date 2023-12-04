@@ -259,7 +259,9 @@ class HybridDataset(torch.utils.data.Dataset):
         vqa_data="llava_instruct_150k",
         reason_seg_data="ReasonSeg|train",
         explanatory=0.1,
-        box_min_size=400
+        box_min_size=400,
+        refcoco_images=2014,
+        refcoco_bbox=2014,
     ):
         self.exclude_val = exclude_val
         self.dataset = dataset
@@ -305,6 +307,8 @@ class HybridDataset(torch.utils.data.Dataset):
                         exclude_val,
                         refer_seg_data,
                         box_min_size,
+                        refcoco_images,
+                        refcoco_bbox,
                     )
                 )
             elif dataset == "vqa":
@@ -455,7 +459,7 @@ class ValDataset(torch.utils.data.Dataset):
         print("box path", boxes_path)
 
         if not os.path.exists(boxes_path):
-            return []
+            boxes_path = boxes_path.replace("val", "train")
 
         with open(boxes_path) as f:
             annotations = json.load(f)

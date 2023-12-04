@@ -273,7 +273,9 @@ def main(args):
         vqa_data=args.vqa_data,
         reason_seg_data=args.reason_seg_data,
         explanatory=args.explanatory,
-        box_min_size = args.box_min_size
+        box_min_size = args.box_min_size,
+        refcoco_images = args.refcoco_images,
+        refcoco_bbox = args.refcoco_bbox,
     )
 
     if args.no_eval == False:
