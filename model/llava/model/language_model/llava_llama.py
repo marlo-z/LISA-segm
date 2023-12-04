@@ -83,6 +83,10 @@ class LlavaLlamaForCausalLM(LlamaForCausalLM, LlavaMetaForCausalLM):
         
         # images: torch.Size([6, 3, 224, 224])
 
+        # print("DEBUG: in LlavaLlama's forward")
+        # print("cropped_boxes", cropped_boxes)
+        # input()
+
         # prepare inputs for multimodal model: images --> image embeddings
         # (concats image embedding from CLIP to text embedding, before feeding to LLM)
         (

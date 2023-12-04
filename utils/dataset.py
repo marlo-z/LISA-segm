@@ -452,11 +452,11 @@ class ValDataset(torch.utils.data.Dataset):
         box_name = image_name.replace("jpg", "json")
         boxes_path = os.path.join(self.bbox_dir, box_name)
 
-        print("Load BBOX:")
-        print("image_path", image_path)
-        print("image name", image_name)
-        print("box_name", box_name)
-        print("box path", boxes_path)
+        # print("Load BBOX:")
+        # print("image_path", image_path)
+        # print("image name", image_name)
+        # print("box_name", box_name)
+        # print("box path", boxes_path)
 
         if not os.path.exists(boxes_path):
             boxes_path = boxes_path.replace("val", "train")

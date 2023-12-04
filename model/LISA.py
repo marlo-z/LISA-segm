@@ -69,8 +69,13 @@ class LisaMetaModel:
     ):
         super(LisaMetaModel, self).__init__(config)
 
+        # print("DEBUG: in init LisaMetaModel")
+        # print("config has train_mask_decoder:", hasattr(self.config, "train_mask_decoder"))
+        # print("config:", self.config)
+        # input()
+
         self.config = config
-        if not hasattr(self.config, "train_mask_decoder"):
+        if not hasattr(self.config, "train_mask_decoder"):      # this is false for both train, val
             self.config.train_mask_decoder = kwargs["train_mask_decoder"]
             self.config.out_dim = kwargs["out_dim"]
             self.vision_pretrained = kwargs.get("vision_pretrained", None)
@@ -78,8 +83,10 @@ class LisaMetaModel:
             self.vision_pretrained = kwargs.get("vision_pretrained", None)
             self.initialize_lisa_modules(self.config)
 
+    # this is called in train_ds.py, 
     def initialize_lisa_modules(self, config):
         # SAM
+        # print("DEBUG: initialize_lisa_modules")
         self.visual_model = build_sam_vit_h(self.vision_pretrained)
         for param in self.visual_model.parameters():
             param.requires_grad = False
@@ -302,13 +309,26 @@ class LISAForCausalLM(LlavaLlamaForCausalLM):
         if inference:
             n_batch = 1
             length = input_ids.shape[0]
+
+            # print("input ids", input_ids.shape)             # [5, 64]    (n_txt, n_tokens)
+            # print("images clip", images_clip.shape)         # [1_img, 3, 224, 224]
+            # print("cropped boxes", cropped_boxes.shape)     # [1_img, n_boxes, 3, 224, 224]
+            # input()
+
             assert images_clip.shape[0] == 1
             images_clip_extend = images_clip.expand(length, -1, -1, -1).contiguous()
+            cropped_boxes_extend = cropped_boxes.expand(length, -1, -1, -1, -1).contiguous()
+
+            # print("after expanding ")
+            # print("images clip extend", images_clip_extend.shape)         # [n_txt, 3, 224, 224]
+            # print("cropped boxes extend", cropped_boxes_extend.shape)     # [n_txt, n_boxes, 3, 224, 224]
 
             output_hidden_states = []
             for i in range(n_batch):
                 start_i, end_i = i * length, min((i + 1) * length, input_ids.shape[0])
                 output_i = super().forward(
+                    # Added:
+                    cropped_boxes = cropped_boxes_extend[: end_i - start_i],
                     images=images_clip_extend[: end_i - start_i],
                     attention_mask=attention_masks[start_i:end_i],
                     input_ids=input_ids[start_i:end_i],
