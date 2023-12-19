@@ -9,3 +9,4 @@ test_clip.py
 test_pad_mask.py
 test_*.py
 test_cropping
+**/*.ipynb_checkpoints/

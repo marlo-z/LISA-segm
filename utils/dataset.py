@@ -260,8 +260,6 @@ class HybridDataset(torch.utils.data.Dataset):
         reason_seg_data="ReasonSeg|train",
         explanatory=0.1,
         box_min_size=400,
-        refcoco_images=2014,
-        refcoco_bbox=2014,
     ):
         self.exclude_val = exclude_val
         self.dataset = dataset
@@ -307,8 +305,6 @@ class HybridDataset(torch.utils.data.Dataset):
                         exclude_val,
                         refer_seg_data,
                         box_min_size,
-                        refcoco_images,
-                        refcoco_bbox,
                     )
                 )
             elif dataset == "vqa":
@@ -448,7 +444,7 @@ class ValDataset(torch.utils.data.Dataset):
         return x
     
     def load_bbox(self, image_path):
-        image_name = image_path.split("/")[-1]
+        image_name = image_path.split("_")[-1]
         box_name = image_name.replace("jpg", "json")
         boxes_path = os.path.join(self.bbox_dir, box_name)
 

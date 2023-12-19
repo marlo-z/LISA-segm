@@ -108,11 +108,7 @@ def parse_args(args):
     # Un-used (used to be for projecting last layer box embeddings)
     # parser.add_argument("--box_projector_params", default="linear", type=str)
     parser.add_argument("--dev", action="store_true", default=False)
-
     parser.add_argument("--box_min_size", default=400, type=int)
-
-    parser.add_argument("--refcoco_images", default=2014, type=int)
-    parser.add_argument("--refcoco_bbox", default=2014, type=int)
 
     return parser.parse_args(args)
 
@@ -278,8 +274,6 @@ def main(args):
         reason_seg_data=args.reason_seg_data,
         explanatory=args.explanatory,
         box_min_size = args.box_min_size,
-        refcoco_images = args.refcoco_images,
-        refcoco_bbox = args.refcoco_bbox,
     )
 
     if args.no_eval == False:
@@ -290,8 +284,6 @@ def main(args):
             args.val_dataset,
             args.image_size,
             box_min_size = args.box_min_size,
-            refcoco_images=args.refcoco_images,
-            refcoco_bbox=args.refcoco_bbox,
         )
         print(
             f"Training with {len(train_dataset)} examples and validating with {len(val_dataset)} examples."

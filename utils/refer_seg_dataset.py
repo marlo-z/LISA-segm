@@ -35,8 +35,6 @@ class ReferSegDataset(torch.utils.data.Dataset):
         exclude_val=False,
         refer_seg_data="refclef||refcoco||refcoco+||refcocog",
         box_min_size=400,
-        refcoco_images=2014,
-        refcoco_bbox=2014,
     ):
         self.exclude_val = exclude_val
         self.samples_per_epoch = samples_per_epoch
@@ -55,8 +53,6 @@ class ReferSegDataset(torch.utils.data.Dataset):
         self.answer_list = ANSWER_LIST
 
         self.box_min_size = box_min_size
-        self.refcoco_images = refcoco_images
-        self.refcoco_bbox = refcoco_bbox
 
         DATA_DIR = os.path.join(base_image_dir, "refer_seg")
         self.refer_seg_ds_list = refer_seg_data.split(
@@ -152,7 +148,7 @@ class ReferSegDataset(torch.utils.data.Dataset):
         return x
 
     def load_bbox(self, image_path):
-        image_name = image_path.split("/")[-1]
+        image_name = image_path.split('_')[-1]
         box_name = image_name.replace("jpg", "json")
         boxes_path = os.path.join(self.bbox_dir, box_name)
 
@@ -232,10 +228,6 @@ class ReferSegDataset(torch.utils.data.Dataset):
         # sampled_ann_ids = np.vectorize(ann_ids.__getitem__)(sampled_inds).tolist()
         sampled_ann_ids = [ann_ids[ind] for ind in sampled_inds]
         sampled_classes = sampled_sents
-
-        # TODO: temp hacky fix
-        if self.refcoco_images == 2017:
-            image_path = image_path.replace("COCO_train2014_", "")
 
         image = cv2.imread(image_path)
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
